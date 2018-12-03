@@ -56,9 +56,9 @@ n_samples = 100              # number of samples to be displayed;
 ### ramdonly select a small subset of data to visualize
 n_samples_per_axis = int (np.sqrt (n_samples))
 ##  if python 3
-sampled_indices = np.array (random.choices (range (0, len (labels)-1), k=n_samples))
+#sampled_indices = np.array (random.choices (range (0, len (labels)-1), k=n_samples))
 ##  if python 2.7
-#sampled_indices = np.array (random.sample (range (0,len (labels)-1), k=n_samples))
+sampled_indices = np.array (random.sample (range (0,len (labels)-1), k=n_samples))
 sampled_images = images [sampled_indices]
 sampled_labels = labels [sampled_indices]
 
@@ -91,5 +91,5 @@ for index, image in enumerate (sampled_images):
 
 ### save plot
 plt.suptitle (str (n_samples) + ' samples of training data')
-h.savefig (plot_folder + 'training_samples.pdf')
+h.savefig (plot_folder + 'training_samples.png')
 plt.close ('all')
