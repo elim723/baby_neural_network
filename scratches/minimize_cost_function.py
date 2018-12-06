@@ -41,7 +41,7 @@ f.close ()
 images = images.reshape (n_images, n_rows, n_cols) / 255.
 
 ### pick first 11 samples to build NN
-n_samples = 50
+n_samples = n_images
 images = images [:n_samples]
 labels = labels [:n_samples]
 
@@ -265,7 +265,36 @@ results = minimize (compute_cost, flat_thetas,
                     jac=compute_derivatives,
                     options={'disp':True, 'maxiter':15000})
 
-results.jac
-compute_derivatives (results.x)
-results.fun
 print (results)
+
+### +-----------------------------------------------------------
+### | Step 8. get predictions
+### +-----------------------------------------------------------
+def predict (thetas):
+
+    ## define variables
+    n_samples = len (labels)
+    n_classes = 10
+    Thetas = roll_array (thetas)
+
+    ## Compute A_1, the neurons at the hidden layer
+    A_0 = [images[i].flatten () for i in range (n_samples)]
+    A_0 = np.vstack ([np.ones (n_samples), np.array (A_0).T])
+    #  Calculate A_1 from A_0 and Theta[0]
+    Z_1 = np.matmul (Thetas[0], A_0)
+    A_1 = sigmoid (Z_1)
+
+    ## Compute A_2, the neurons at the outer layer
+    A_1 = np.vstack ([np.ones (n_samples), A_1])
+    #  Calculate A_2 from A_1 and Theta[1]
+    Z_2 = np.matmul (Thetas[1], A_1)
+    A_2 = sigmoid (Z_2)
+
+    ## find max per column as prediction
+    return np.argmax (A2, axis=0)
+
+predicted = predict (results.x)
+print ('| predicted | truth |')
+print ('+-----------+-------+')
+for i in range (n_samples[:10]):
+    print ('| {0:9} {1:5}'.format (predicted[i], labels[i]))
