@@ -1,3 +1,32 @@
+####
+#### By Elim Thompson (12/02/2018)
+####
+#### This script focuses on computing the cost function of a
+#### simple neural network structure. A neural network connects
+#### the different features via sets of weights / thetas, each
+#### of which indicates the importance or the contributions
+#### from the corresponding features. A neural network of
+#### a given structure is therefore defined by these thetas.
+#### The goal to have a predictive neural network is to find
+#### the values of these thetas that gave accurate predictions.
+####
+#### The accuracy of a neural network is described by the cost
+#### function. It is simply a quantity that measures how
+#### different the prediction is from its truth. This script
+#### explains how a neural network is built, how such a cost
+#### function is defined, and how to compute the cost of the
+#### given sets of thetas.
+####
+#### Note that because we do not know the theta's yet, we
+#### have some initialized thetas very close to zeros. It implies
+#### that the predictive-ness of this model is very bad. To
+#### find the numerical values of these thetas, we need to know
+#### the derivatives of the cost function, which is explained
+#### in cost_function_derivative.py. Once we have that set up
+#### we can find the values of thetas that will give us the
+#### best predictive power.
+#####################################################################
+
 ### import packages
 import numpy as np
 import struct, random, math
@@ -341,7 +370,7 @@ print (Y)
 ## |    J (theta) = 1/m sum_i [-Y * log (A_2) - (1-Y) * log (1-A_2)]
 ## +--------------------------------------------------------------
 #  Compute cost for each input image
-j = np.matmul (-Y, np.log (A_2)) - np.matmul (1-Y, np.log (1-A_2))
+j = -Y * np.log (A_2) - (1-Y) * np.log (1-A_2)
 #  Look at the costs per prediction per image.
 #  The costs are pretty large and pretty even across all classes.
 #  Once we find the right set of thetas, we should see these
