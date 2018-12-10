@@ -63,7 +63,16 @@ default_image_test_filename  = default_work_folder + 'datasets/t10k-images-idx3-
 
 class data_loader (object):
 
-    ''' A class to load label and image data '''
+    ''' A class to load label and image data
+
+        Examples
+        --------
+        In [1]: import data_loader
+        In [2]: data = data_loader.data_loader ()
+        In [3]: data.set_train_subset (100, random_sample=True)
+        In [4]: training_images = data.train_images
+        In [4]: data.display_images (data.train_images, plot_name='train.png')
+    '''
 
     def __init__ (self,
                   label_train_filename=default_label_train_filename,
@@ -91,13 +100,40 @@ class data_loader (object):
         self._full_train_labels, self._full_test_labels = None, None
         self._n_pixels_per_row   = 0
         self._n_pixels_per_col   = 0
-        self._max_n_train_samples = 0
-        self._max_n_test_samples  = 0
         self._n_classes = 10         ## an image must belong to one of the 10 digits 0-9
         self._max_pixel_intensity = 255
         ### set up properties accessible by public
-        self._n_train_samples = 1
-        self._n_test_samples = 1
+        self._train_sample_indices = None
+        self._test_sample_indices = None
+
+    def __str__ (self):
+
+        try:
+            ### this is used when subset of training / testing samples are sampled
+            return '{0} ({1}) training (testing) examples are sampled from a total of {2} ({3}) training (testing) examples.'.format (self.n_train_samples, self.n_test_samples, self.max_n_train_samples, self.max_n_test_samples)
+        except:
+            try:
+                ### this is used when subset of training samples are sampled, but not testing
+                return '{0} training examples are sampled from a total of {1} training examples.'.format (self.n_train_samples, self.max_n_train_samples)
+            except:
+                try:
+                    ### this is used when subset of testing samples are sampled, but not training
+                    return '{0} testing examples are sampled from a total of {1} testing examples.'.format (self.n_test_samples, self.max_n_test_samples)
+                except:
+                    try:
+                        ### this is used when both training and testing sets are loaded
+                        return 'A total of {0} ({1}) training (testing) examples is loaded. No sampling was done'.format (self.max_n_train_samples, self.max_n_test_samples)
+                    except:
+                        try:
+                            ### this is used when training but not testing is loaded
+                            return 'A total of {0} training examples is loaded. No sampling was done'.format (self.max_n_train_samples)
+                        except:
+                            try:
+                                ### this is used when testing but not training is loaded
+                                return 'A total of {0} testing examples is loaded. No sampling was done'.format (self.max_n_test_samples)
+                            except:
+                                ### this is used when nothing is loaded
+                                return 'No training / testing examples.'
 
     @property
     def full_train_images (self):
@@ -121,11 +157,15 @@ class data_loader (object):
 
     @property
     def max_n_train_samples (self):
-        return self._max_n_train_samples
+        if self._full_train_labels is None:
+            raise UnboundLocalError ('Full training samples are not loaded yet.')
+        return len (self._full_train_labels)
 
     @property
     def max_n_test_samples (self):
-        return self._max_n_test_samples
+        if self._full_test_labels is None:
+            raise UnboundLocalError ('Full testing samples are not loaded yet.')
+        return len (self._full_test_labels)
 
     @property
     def n_pixels_per_row (self):
@@ -141,27 +181,39 @@ class data_loader (object):
 
     @property
     def n_train_samples (self):
-        return self._n_train_samples
-
-    @n_train_samples.setter
-    def n_train_samples (self, value):
-        try:
-            self._n_train_samples = self._check_n_samples (value, is_test=False)
-        except:
-            message = 'n_train_samples must be either a float <= 1.0 or an integer.'
-            raise TypeError (message)
+        if self._train_sample_indices is None:
+            raise UnboundLocalError ('Training examples are not sampled yet.')
+        return len (self._train_sample_indices)
 
     @property
     def n_test_samples (self):
-        return self._n_test_samples
+        if self._test_sample_indices is None:
+            raise UnboundLocalError ('Testing examples are not sampled yet.')
+        return len (self._test_sample_indices)
 
-    @n_test_samples.setter
-    def n_test_samples (self, value):
-        try:
-            self._n_test_samples = self._check_n_samples (value, is_test=True)
-        except:
-            message = 'n_test_samples must be either a float <= 1.0 or an integer.'
-            raise TypeError (message)
+    @property
+    def train_images (self):
+        if self._train_sample_indices is None:
+            raise UnboundLocalError ('Training examples are not sampled yet.')
+        return self._full_train_images[self._train_sample_indices]
+
+    @property
+    def train_labels (self):
+        if self._train_sample_indices is None:
+            raise UnboundLocalError ('Training examples are not sampled yet.')
+        return self._full_train_labels[self._train_sample_indices]
+
+    @property
+    def test_images (self):
+        if self._test_sample_indices is None:
+            raise UnboundLocalError ('Testing examples are not sampled yet.')
+        return self._full_test_images[self._test_sample_indices]
+
+    @property
+    def test_labels (self):
+        if self._test_sample_indices is None:
+            raise UnboundLocalError ('Testing examples are not sampled yet.')
+        return self._full_test_labels[self._test_sample_indices]
 
     def _check_n_samples (self, value, is_test=False):
 
@@ -181,25 +233,34 @@ class data_loader (object):
                 n_samples (int): number of test/train samples to be included
         '''
 
-        ## if value is less than 1, it is a percentage
-        ## else it is the actual number of training samples
-        n_samples = int (max_n_samples * value) if value <= 1.0 else value
+        try:
 
-        ## make sure the input n samples is an integer
-        if not type (n_samples) == int:
+            max_n_samples = self.max_n_test_samples if is_test else \
+                            self.max_n_train_samples
+
+            ## if value is less than 1, it is a percentage
+            ## else it is the actual number of training samples
+            n_samples = int (max_n_samples * value) if value <= 1.0 else value
+
+            ## make sure the input n samples is an integer
+            if not type (n_samples) == int:
+                variable = 'n_test_samples' if is_test else 'n_train_samples'
+                message = variable + ' must be either a float <= 1.0 or an integer.'
+                raise TypeError (message)
+
+            ## make sure the input n samples is less than max
+            if n_samples > max_n_samples:
+                variable = 'n_test_samples' if is_test else 'n_train_samples'
+                message = variable + ' cannot be larger than ' + str (max_n_samples) + '.'
+                raise ValueError (message)
+
+            return n_samples
+
+        except:
+            ### input n_samples is not the right type
             variable = 'n_test_samples' if is_test else 'n_train_samples'
             message = variable + ' must be either a float <= 1.0 or an integer.'
             raise TypeError (message)
-
-        ## make sure the input n samples is less than max
-        max_n_samples = self._max_n_train_samples if is_test else \
-                        self._max_n_train_samples
-        if n_samples > max_n_samples:
-            variable = 'n_test_samples' if is_test else 'n_train_samples'
-            message = variable + ' cannot be larger than ' + str (max_n_samples) + '.'
-            raise ValueError (message)
-
-        return n_samples
 
     def _load_data (self, image_filename, label_filename):
 
@@ -255,7 +316,6 @@ class data_loader (object):
 
         ### store them in self
         self._full_train_images, self._full_train_labels = images, labels
-        self._max_n_train_samples = len (labels)
 
     def load_test_samples (self):
 
@@ -266,62 +326,59 @@ class data_loader (object):
 
         ### store them in self
         self._full_test_images, self._full_test_labels = images, labels
-        self._max_n_test_samples = len (labels)
 
-    def _get_random_indices (self, n_samples, is_test=False):
+    def _get_random_indices (self, n_samples, max_n_samples):
 
-        max_n_samples = self._max_n_test_samples if is_test else \
-                        self._max_n_train_samples
+        ''' A private function to get random indices
+
+            input params
+            ------------
+                n_samples (int): number of sampled examples
+                max_n_samples (int): maximum number of examples to be sampled from
+
+            output params
+            -------------
+                sampled_indices (np.array): selected indices
+        '''
 
         population = range (max_n_samples)
 
         ### randomly select the training sam = ples by the indices
         try:
             ## if python 3+
-            sampled_indices = random.choices (population, k=n_samples)
+            return random.choices (population, k=n_samples)
         except:
             ##  if python 2.7
-            sampled_indices = random.sample (population, k=n_samples)
-        return sampled_indices
+            return random.sample (population, k=n_samples)
 
-    def _get_sample (self, is_test=False, random_sample=False):
+    def _get_sampled_indices (self, n_samples, is_test=False, random_sample=False):
 
-        ''' A private function returning a subset of training / testing sample.
+        ''' A private function returning the sampled indices
 
             input params
             ------------
-                is_test (bool): If True, randomly sample from full test examples.
-                                By default, randomly sample from full train examples.
+                n_samples (int): number of examples to be sampled
+                is_test  (bool): If True, randomly sample from full test examples.
+                                 By default, randomly sample from full train examples.
                 random_sample (bool): If True, randomly sample from full samples
 
             output params
             -------------
-                sampled_images (array): sampled images with a size of n_samples x
-                                        n_pixels_per_rows x n_pixels_per_cols
-                sampled_labels (array): sampled labels of true digits of loaded images
+                sampled_indices (array): sampled indices from full sample
         '''
 
         ### define variables based on training / testing samples
-        if is_test:
-            full_images, full_labels = self._full_test_images, self._full_test_labels
-            n_samples = self.n_test_samples
-        else:
-            full_images, full_labels = self._full_train_images, self._full_train_labels
-            n_samples = self.n_train_samples
+        max_n_samples = self.max_n_test_samples if is_test else self.max_n_train_samples
 
-        sampled_indices = self._get_random_indices (n_samples, is_test=is_test) \
+        sampled_indices = self._get_random_indices (n_samples, max_n_samples) \
                           if random_sample else range (n_samples)
 
-        ### actually get the images and labels
-        sampled_images = full_images [sampled_indices]
-        sampled_labels = full_labels [sampled_indices]
+        ### return the sampled indices / images / labels
+        return sampled_indices
 
-        ### return the sampled images / labels
-        return sampled_images, sampled_labels
+    def set_train_subset (self, n_samples, random_sample=False):
 
-    def get_train_samples (self, n_samples, random_sample=False):
-
-        ''' A public function returning a subset of training sample.
+        ''' A public function set a subset of training sample.
 
             input params
             ------------
@@ -329,46 +386,83 @@ class data_loader (object):
                                          If int, it is actual sample size.
                                          This will reset self._n_train_samples
                 random_sample (bool): If True, randomly sample from full samples
-
-            output params
-            -------------
-                sampled_images (array): sampled training images with a size of
-                                        n_samples x n_pixels_per_rows x n_pixels_per_cols
-                sampled_labels (array): sampled labels of true digits of loaded
-                                        training images
         '''
 
         ### load training samples if not already
         if self._full_train_images is None or self._full_train_labels is None:
             self.load_train_samples ()
-        ### set n_training_samples
-        self.n_train_samples = n_samples
+        ### make sure input n_samples is legit
+        n_samples = self._check_n_samples (n_samples, is_test=False)
 
-        return self._get_sample (is_test=False, random_sample=random_sample)
+        ### get sampled indices
+        self._train_sample_indices = \
+            self._get_sampled_indices (n_samples, is_test=False,
+                                       random_sample=random_sample)
 
-    def get_test_samples (self, n_samples, random_sample=False):
+    def set_test_subset (self, n_samples, random_sample=False):
 
-        ''' A public function returning a subset of testing sample.
+        ''' A public function set a subset of testing sample.
 
             input params
             ------------
                 n_samples (float / int): If float less than 1.0, its percentage.
                                          If int, it is actual sample size.
-                                         This will reset self._n_test_samples
+                                         This will reset self._n_train_samples
                 random_sample (bool): If True, randomly sample from full samples
-
-            output params
-            -------------
-                sampled_images (array): sampled testing images with a size of
-                                        n_samples x n_pixels_per_rows x n_pixels_per_cols
-                sampled_labels (array): sampled labels of true digits of loaded
-                                        testing images
         '''
 
         ### load testing samples if not already
         if self._full_test_images is None or self._full_test_labels is None:
             self.load_test_samples ()
-        ### set n_testing_samples if not already
-        self.n_test_samples = n_samples
+        ### make sure input n_samples is legit
+        n_samples = self._check_n_samples (n_samples, is_test=True)
 
-        return self._get_sample (is_test=True, random_sample=random_sample)
+        ### get sampled indices
+        self._test_sample_indices = \
+            self._get_sampled_indices (n_samples, is_test=True,
+                                       random_sample=random_sample)
+
+    def display_images (self, images,
+                        plot_name = default_plot_folder + 'images.pdf'):
+
+        ''' A public function to display input images
+
+            input params
+            ------------
+                images  (array): a n_images x n_row x n_col array with
+                                 intensities of all pixels
+                plot_name (str): path / name of output plot
+        '''
+
+        ### figure size is 7.5 inches width x 5.5 inches height
+        h = plt.figure (figsize=(7.5, 5.5))
+
+        ### divide plot into sub plots
+        n_samples_per_axis = int (np.ceil (np.sqrt (len (images))))
+        gs = gridspec.GridSpec (n_samples_per_axis, n_samples_per_axis)
+        gs.update (wspace=0.1, hspace=0.1)
+
+        ### set x / y edges
+        xedges = np.arange (0, self.n_pixels_per_col+1)
+        xedges = xedges[:-1] + 0.5*(xedges[1:] - xedges[:-1])
+        yedges = np.arange (0, self.n_pixels_per_row+1)
+        yedges = yedges[:-1] + 0.5*(yedges[1:] - yedges[:-1])
+
+        ##  loop through each selected image and plot
+        for index, image in enumerate (images):
+
+            # location of the index-th subplot
+            axis = h.add_subplot (gs[index])
+
+            # plot intensity; inverted so it is not up side down
+            axis.pcolormesh (xedges, yedges, image[::-1],
+                             vmin=0, vmax=1, cmap=plt.get_cmap ('gray'))
+
+            # hide all axes ticks
+            axis.get_xaxis ().set_ticks ([])
+            axis.get_yaxis ().set_ticks ([])
+
+        ### save plot
+        plt.suptitle (str (len (images)) + ' examples of hand written digits')
+        h.savefig (plot_name)
+        plt.close ('all')
