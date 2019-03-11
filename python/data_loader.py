@@ -109,30 +109,30 @@ class data_loader (object):
     def __str__ (self):
 
         try:
-            ### this is used when subset of training / testing samples are sampled
+            ### used when subset of training / testing samples are sampled
             return '{0} ({1}) training (testing) examples are sampled from a total of {2} ({3}) training (testing) examples.'.format (self.n_train_samples, self.n_test_samples, self.max_n_train_samples, self.max_n_test_samples)
         except:
             try:
-                ### this is used when subset of training samples are sampled, but not testing
+                ### used when subset of training samples are sampled, but not testing
                 return '{0} training examples are sampled from a total of {1} training examples.'.format (self.n_train_samples, self.max_n_train_samples)
             except:
                 try:
-                    ### this is used when subset of testing samples are sampled, but not training
+                    ### used when subset of testing samples are sampled, but not training
                     return '{0} testing examples are sampled from a total of {1} testing examples.'.format (self.n_test_samples, self.max_n_test_samples)
                 except:
                     try:
-                        ### this is used when both training and testing sets are loaded
+                        ### used when both training and testing sets are loaded
                         return 'A total of {0} ({1}) training (testing) examples is loaded. No sampling was done'.format (self.max_n_train_samples, self.max_n_test_samples)
                     except:
                         try:
-                            ### this is used when training but not testing is loaded
+                            ### used when training but not testing is loaded
                             return 'A total of {0} training examples is loaded. No sampling was done'.format (self.max_n_train_samples)
                         except:
                             try:
-                                ### this is used when testing but not training is loaded
+                                ### used when testing but not training is loaded
                                 return 'A total of {0} testing examples is loaded. No sampling was done'.format (self.max_n_test_samples)
                             except:
-                                ### this is used when nothing is loaded
+                                ### used when nothing is loaded
                                 return 'No training / testing examples.'
 
     @property

@@ -1,82 +1,151 @@
 ####
-#### By Elim Thompson (12/03/2018)
+#### By Elim Thompson (12/09/2018)
 ####
-#### Previously, we have built a NN and computed the cost function and its
-#### derivatives w.r.t. all thetas. Now its time to minimize the cost to
-#### find the best set of thetas to predict the digit of a given image.
+#### Once the user specified the structure, this neural_network class is
+#### set up to perform the followings:
+####   -- initialize randomized thetas (i.e. weights)
+####   -- compute the cost and its derivatives w.r.t. each theta
+####      provided a set of thetas and training samples
+####   -- find the best set of thetas based on the training set
+####   -- compute accuracy of predictions based on the best fit thetas
 ############################################################################
 
 ### import packages
 import numpy as np
-import struct, random
 from copy import deepcopy
 from scipy.optimize import minimize
 
-### +------------------------------------------
-### | Step 1. read training data
-### +------------------------------------------
-### define dataset locations
-plot_folder    = '/home/elims/elimstuff/programming/projects/nn_digits/scripts/plots/'
-dataset_folder = '/home/elims/elimstuff/programming/projects/nn_digits/datasets/'
-label_filename = dataset_folder + 'train-labels-idx1-ubyte'
-image_filename = dataset_folder + 'train-images-idx3-ubyte'
+default_epsilon = 0.12        # small factor for randomizing initial thetas
+default_Lambda  = 1.0         # regularization factor
+default_hidden_layers = [25]  # structure of NN inner layers
 
-### deal with label file
-with open (label_filename, 'rb') as f:
-    magic_label, n_labels = struct.unpack ('>II',f.read(8))
-    labels = np.fromfile (f, dtype=np.uint8)
-f.close ()
+sigmoid = lambda Z: 1 / (1+np.exp (-1*Z))
+dsigmoid = lambda Z: sigmoid (Z) * (1-sigmoid (Z))
 
-### deal with image file
-with open (image_filename, 'rb') as f:
-    magic_image, n_images, n_rows, n_cols = struct.unpack ('>IIII',f.read(16))
-    images = np.fromfile (f, dtype=np.uint8)
-f.close ()
+class neural_network (object):
 
-### +------------------------------------------
-### | Step 2. massage data
-### +------------------------------------------
-### reshape `images` to a n_images x n_rows x n_cols matrix
-### and normalize all pixel to 255
-images = images.reshape (n_images, n_rows, n_cols) / 255.
+    ''' A class to perform neural network training. '''
 
-### pick first 11 samples to build NN
-n_samples = n_images
-images = images [:n_samples]
-labels = labels [:n_samples]
+    def __init__ (self):
 
-### define some variables
-n_pixels_per_axis  = n_rows             # number of pixels per dimension
-n_pixels = n_rows * n_rows              # number of pixels per image
-                                        # (i.e. number of input features / neurons)
-n_classes = 10                          # number of classes 0-9
-                                        # (i.e. number of output neurons)
+        self._nn_struct = None
+        self._n_pixels  = None
+        self._hidden_layers = None
+        self._n_neurons_at_end_layer = 10 ## from 0 to 9
 
-### +-------------------------------------------------------------
-### | Step 3. set up neural network structure
-### +-------------------------------------------------------------
-### set up neural network struction
-n_neuron_per_hidden_layer = [25]
-nn_struct = np.r_[n_pixels, n_neuron_per_hidden_layer, n_classes]
+    @property
+    def hidden_layers (self):
+        if self._hidden_layers is None:
+            raise UnboundLocalError ('Structure of neural network has not defined.')
+        return self._hidden_layers
 
-### +-------------------------------------------------------------
-### | Step 4. randomize initial thetas
-### +-------------------------------------------------------------
-def rand_initial_thetas (n_cols, n_rows, epsilon):
-    ### get a randomized matrix between 0 and 1
-    random_matrix = np.random.rand (n_rows, n_cols)
-    ### rescale to -epsilon to epsilon
-    random_matrix = random_matrix * 2 * epsilon - epsilon
-    ### return a numpified the randomized matrix
-    return np.array (random_matrix)
+    @hidden_layers.setter
+    def hidden_layers (self, input):
+        try:
+            ## if input is a list or an array, make sure each
+            ## element is an integer by converting them to int
+            self._hidden_layers = [int (i) for i in input]
+        except:
+            try:
+                ## if input is an integer / float, hidden layer is
+                ## just 1 layer with number of neurons = the flor of input
+                self._hidden_layers = [int (input)]
+            except:
+                message = 'Given input is type of {0}.'.format (type (input))
+                message += 'List / array of numbers OR a number is expected.'
+                raise ValueError (message)
 
-##  initial thetas are randomized around zero to break the symmetry
-epsilon = 0.12
-initial_thetas = np.array ([ rand_initial_thetas (nn_struct[layer]+1, nn_struct[layer+1], epsilon)
-                             for layer in range (len (nn_struct)-1) ])
+    @property
+    def n_pixels (self):
+        if self._n_pixels is None:
+            raise UnboundLocalError ('Input n_pixels has not defined.')
+        return self._n_pixels
 
-##  define lambda for regularization
-Lambda = 1.0
+    @n_pixels.setter
+    def n_pixels (self, input):
+        try:
+            ## if input is an integer or a float, n_pixels is the floor
+            ## of the float
+            self._n_pixels = int (input)
+        except:
+            message = 'Given input is type of {0}.'.format (type (input))
+            message += 'A number is expected.'
+            raise ValueError (message)
+
+    @property
+    def nn_struct (self):
+
+        if self._hidden_layers is None:
+            raise UnboundLocalError ('Hidden layers must be defined first.')
+        if self._n_pixels is None:
+            raise UnboundLocalError ('First layer (n_pixels) must be defined first.')
+
+        return np.r_[self._n_pixels, self._hidden_layers,
+                     self._n_neurons_at_end_layer]
+
+    @property
+    def n_layers (self):
+        return len (self.nn_struct)
+
+    @property
+    def n_thetas_per_layer (self):
+        return (self.nn_struct[:-1]+1) * self.nn_struct [1:]
+
+    def _initialize_thetas (self, epsilon=default_epsilon):
+
+        ''' A private function to obtain a randomized values for all initial thetas
+            as a 1D array. These initial values don't really matter, because
+            they will be optimized later. Ideally, all thetas (or weights) should
+            start from zeros. That is, we start with a flat line with zero slope.
+            However, setting their initial values to absolutely zero would lead
+            to degeneracy during minimization - the NN algorithm breaks down
+            because all neurons in all layers will perform the same calculations.
+            Therefore, in practice, we usually set them to be very close to zeros.
+            Here, we start with some randomized initial thetas around zero with a
+            perturbation of small epsilon.
+
+            Note that this function only initialize all thetas as a 1D array.
+            Suppose there are M neurons in the 0-th layer, N neurons in the 1-st
+            layer, and 10 neurons in the last layer. Between each layer has a matrix
+            of thetas: Theta1 for the weights betwee the 0-th and 1-st layer, and
+            Theta2 for the weights betwee the 1-st and 2-nd layer. Theta1 has a
+            dimension of (M+1) x N, where the extra `+1` neuron corresponds to the
+            constant (y-intercept) parameter of the fitted line. Similary, Theta2
+            has a dimension of (N+1) x 10. This function generates an array of small
+            random numbers with a total length equal to the number of thetas from
+            both Thetas (i.e. (M+1) x N + (N+1) x 10). To roll the initialized
+            thetas back to matrix-form, use the generator function _roll_array ().
+
+            input params
+            ------------
+            epsilon (float): small factor for randomization
+
+            return params
+            -------------
+            random_array (np.ndarray): flattened array of a (m+1) x n matrix
+        '''
+
+        ### generate an array of random numbers for all thetas
+        random_array = np.random.rand (sum (self.n_thetas_per_layer))
+        ### rescale to -epsilon to epsilon
+        random_array = random_array * 2 * epsilon - epsilon
+        ### return a numpified the randomized array
+        return np.array (random_array)
+
+    def _roll_array (self, array):
+
+        ## the corresponding indices that locates thetas at next layer
+        theta_indices = np.r_[0, np.cumsum (self.n_thetas_per_layer)]
+
+        for ith in range (self.n_layers-1):
+            start_index, end_index = theta_indices[ith], theta_indices[ith+1]
+            elements_at_ith_layer = array [start_index:end_index]
+            shape_at_ith_layer = (self.nn_struct[ith+1], self.nn_struct[ith]+1)
+            yield elements_at_ith_layer.reshape (shape_at_ith_layer)
+
+
+
+'''
 
 def unroll_array (array):
     return np.concatenate ([array[i].ravel () for i in range (len (nn_struct)-1)]).ravel ()
@@ -298,3 +367,4 @@ print ('| predicted | truth |')
 print ('+-----------+-------+')
 for i in range (n_samples[:10]):
     print ('| {0:9} {1:5}'.format (predicted[i], labels[i]))
+'''

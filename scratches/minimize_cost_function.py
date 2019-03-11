@@ -291,10 +291,13 @@ def predict (thetas):
     A_2 = sigmoid (Z_2)
 
     ## find max per column as prediction
-    return np.argmax (A2, axis=0)
+    return np.argmax (A_2, axis=0)
 
 predicted = predict (results.x)
 print ('| predicted | truth |')
 print ('+-----------+-------+')
-for i in range (n_samples[:10]):
+for i in range (10):
     print ('| {0:9} {1:5}'.format (predicted[i], labels[i]))
+
+accurate = predicted==labels
+len (predicted[accurate])/len (predicted)
