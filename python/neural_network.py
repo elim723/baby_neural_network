@@ -91,7 +91,8 @@ class neural_network (object):
     def n_thetas_per_layer (self):
         return (self.nn_struct[:-1]+1) * self.nn_struct [1:]
 
-    def initialize_thetas (self, epsilon=default_epsilon):
+    def initialize_thetas (self, epsilon=default_epsilon,
+                           return_1d=False):
 
         ''' A public function to obtain a randomized values for all initial thetas
             as a 1D array. These initial values don't really matter, because
@@ -119,7 +120,10 @@ class neural_network (object):
 
             input params
             ------------
-            epsilon (float): small factor for randomization
+            epsilon  (float): small factor for randomization
+            return_1d (bool): If True, return a giant 1d array of all matrix
+                              elements. Otherwise, return an array where each
+                              element is a matrix.
 
             return params
             -------------
@@ -130,6 +134,10 @@ class neural_network (object):
         random_thetas = np.random.rand (sum (self.n_thetas_per_layer))
         ### rescale to -epsilon to epsilon
         random_thetas = random_thetas * 2 * epsilon - epsilon
+
+        ### return 1d array if asked
+        if return_1d: return random_thetas
+
         ### roll the randomized thetas to an array of matrices with
         ### correct sizes
         random_array = list (self._roll_array (random_thetas))
@@ -250,6 +258,10 @@ class neural_network (object):
         ##  image, and each row corresponds to the pixel values of the image.
         A = np.array ([images[i].ravel () for i in range (n_samples)]).T
 
+        if debug:
+            print ('| Computing the cost from {0} sample sizes ...'.format (n_samples))
+            print ('| ')
+
         ### loop through each hidden layer to replace the value of A,
         ### which is the sigmoid function of the linear contributions.
         for ith in range (self.n_layers-1):
@@ -259,6 +271,12 @@ class neural_network (object):
             ##  Add an extra row of 1 for bias unit
             A = np.vstack ([np.ones (n_samples), A])
 
+            if debug:
+                print ('|  +-----------------------------------------------')
+                print ('|  | At {0}-th hidden layer, '.format (ith))
+                print ('|  |   -- A shape    : {0}'.format (A.shape))
+                print ('|  |   -- theta shape: {0}'.format (theta_i.shape))
+
             ## At the i-th layer, a matrix `Z` is defined as the dot product
             ## between the theta of this layer and previous `A`. `Z` is the
             ## linear combination from all neurons of the i-th layer multiplied
@@ -266,6 +284,10 @@ class neural_network (object):
             Z = np.matmul (theta_i, A)
             ## Matrix `A` of this layer is simply the sigmoid of Z
             A = sigmoid (Z)
+
+            if debug:
+                print ('|  |   -- theta shape: {0}'.format (theta_i.shape))
+                print ('|  |   -- A shape    : {0}'.format (A.shape))
             #print ('A_0         shape: {0}'.format (A_0.shape))
             #print ('Theta_0     shape: {0}'.format (Thetas[0].shape))
             #print ('Z_1 = T0.A0 shape: {0}'.format (Z_1.shape))
@@ -295,14 +317,14 @@ class neural_network (object):
         J = -Y * np.log (A) - (1-Y) * np.log (1-A)
         ### The averaged total cost is the mean of all costs. This averaged cost
         ### is similar to a chi2 in a simple line fit.
-        j = np.sum (J) / float (n_samples)
+        j = np.sum (J) / n_samples
 
         ### Finally, regularizatoin is added to the total cost. The purpose of
         ### regularization is to reduce the importance of each theta / weight by
         ### adding a small factor that depends on the square of theta. This is
         ### similar to adding penalties during chi2 minimization when theta is
         ### getting too large.
-        j += Lambda / 2 / float (n_samples) * theta_squared
+        j += Lambda / 2 / n_samples * theta_squared
 
         ### If the cost is infinite, set the cost to be a very large value.
         if not np.isfinite (j): j = 1e10
