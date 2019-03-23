@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 ####
 #### By Elim Thompson (12/09/2018)
 ####
@@ -28,10 +30,12 @@ class neural_network (object):
 
     def __init__ (self):
 
+        self._n_classes = 10       ## from 0 to 9
         self._nn_struct = None
         self._n_pixels  = None
+        self._As        = None     ## temporary store A matrices for derivatives
+        self._Zs        = None     ## temporary store Z matrices for derivatives
         self._hidden_layers = None
-        self._n_classes = 10 ## from 0 to 9
 
     @property
     def hidden_layers (self):
@@ -91,6 +95,37 @@ class neural_network (object):
     def n_thetas_per_layer (self):
         return (self.nn_struct[:-1]+1) * self.nn_struct [1:]
 
+    def _get_truth_matrix (self, labels):
+
+        ''' A private function to obtain a truth matrix when true labels are given.
+            The number of row is 10 corresponding to the 10 classes, where the number
+            of column is the number of labels. The matrix elements are either 0 or 1.
+            For an element at the i-th row and j-th column, 0 means that the j-th
+            label does not belong to the i-th class, and 1 means the opposite.
+
+            input params
+            ------------
+            labels (np.ndarray): a 1d array of true digits
+
+            output params
+            -------------
+            truth_matrix (np.ndarray): a (n_classes x n_samples) array of truth matrix
+        '''
+
+        ### Determine the shape of truth matrix
+        ##  Number of row = number of classes
+        ##  Number of column = number of samples
+        shape = (self._n_classes, len (labels))
+
+        ### Initialize truth matrix as all zeros
+        truth_matrix = np.zeros (shape)
+
+        ### Loop through each class and change the ones that are the same as label
+        for digit in range (shape[0]):
+            truth_matrix [digit, :] = labels==digit
+
+        return truth_matrix
+
     def initialize_thetas (self, epsilon=default_epsilon,
                            return_1d=False):
 
@@ -140,13 +175,13 @@ class neural_network (object):
 
         ### roll the randomized thetas to an array of matrices with
         ### correct sizes
-        random_array = list (self._roll_array (random_thetas))
+        random_array = list (self.roll_array (random_thetas))
         ### return a numpified array
         return np.array (random_array)
 
-    def _roll_array (self, array):
+    def roll_array (self, array, reverse=False):
 
-        ''' This is a private generator function that put a 1D array into an array
+        ''' This is a public generator function that put a 1D array into an array
             of matrices with the corresponding shape. The input array must have a
             length of sum_i [(m_i+1) x m_(i+1)] where m_i is the number of neurons
             of each layer from the input layer all the way to the last hidden layer
@@ -158,6 +193,7 @@ class neural_network (object):
             ------------
             array (np.ndarray): a 1D array that has a length equal to the total
                                 number of thetas of the neural network.
+            reverse     (bool): If True, return from the outermost layer
 
             yield params
             -------------
@@ -174,20 +210,28 @@ class neural_network (object):
         ### identify the indices that locate elements of next layer
         indices = np.r_[0, np.cumsum (self.n_thetas_per_layer)]
 
-        ### look through each layer (exclude last layer) and spit out
-        ### the matrix of that layer
-        for ith in range (self.n_layers-1):
+        ### define ordering
+        ##  If not reverse, from first to the second last layer
+        ##  If reverse, from last hidden layer to first
+        start = self.n_layers - 1 if reverse else 0
+        end   = 0  if reverse else self.n_layers - 1
+        step  = -1 if reverse else 1
+
+        ### look through each layer and spit out the matrix of that layer
+        for ith in range (start, end, step):
             ## identify the thetas of this layer based on indices
-            start_index, end_index = indices[ith], indices[ith+1]
-            elements_at_ith_layer = array [start_index:end_index]
+            start_index = indices[ith-1] if reverse else indices[ith]
+            end_index   = indices[ith]   if reverse else indices[ith+1]
+            elements_at_ilayer = array [start_index:end_index]
             ## determine the expected shape of this matrix
-            shape_at_ith_layer = (self.nn_struct[ith+1], self.nn_struct[ith]+1)
+            shape_at_ilayer = (self.nn_struct[ith]  , self.nn_struct[ith-1]+1) if reverse else \
+                              (self.nn_struct[ith+1], self.nn_struct[ith]+1)
             ## spit out matrix with expected shape
-            yield elements_at_ith_layer.reshape (shape_at_ith_layer)
+            yield elements_at_ilayer.reshape (shape_at_ilayer)
 
-    def _unroll_array (self, array):
+    def unroll_array (self, array):
 
-        ''' A private function that flattens an array of matrices into one giant
+        ''' A public function that flattens an array of matrices into one giant
             1D array.
 
             input params
@@ -230,7 +274,9 @@ class neural_network (object):
 
             To avoid memory-intensive for-loops, the cost calculation is performed
             via matrices using a generator function. Although these make it harder
-            to understand the code, it significantly improves performances.
+            to understand the code, it significantly improves performances. Note
+            that the As and Zs matrices are stored in `self` for later uses when
+            computing the derivatives of cost with respect to thetas.
 
             input params
             ------------
@@ -244,13 +290,16 @@ class neural_network (object):
 
             return params
             -------------
-            j (float): mean cost of predictions from input thetas on input images
+            j (float)     : mean cost of predictions from input thetas on input images
         '''
 
         ### define / initialize parameters
         n_samples        = len (labels)               # number of input samples
         theta_squared    = 0.                         # regularization term
-        thetas_generator = self._roll_array (thetas)  # input thetas in matrix form
+        thetas_generator = self.roll_array (thetas,   # input thetas in matrix form
+                                            reverse=False)
+        ##  initialize A and Z containers
+        self._As, self._Zs = [], []
 
         ### start with input images at first layer
         ##  Each pixel in an image is the input of a neuron in the first layer. A
@@ -259,8 +308,8 @@ class neural_network (object):
         A = np.array ([images[i].ravel () for i in range (n_samples)]).T
 
         if debug:
-            print ('| Computing the cost from {0} sample sizes ...'.format (n_samples))
-            print ('| ')
+            print ('## Computing the cost from {0} sample sizes ...'.format (n_samples))
+            print ('## ')
 
         ### loop through each hidden layer to replace the value of A,
         ### which is the sigmoid function of the linear contributions.
@@ -270,29 +319,24 @@ class neural_network (object):
             theta_i = next (thetas_generator)
             ##  Add an extra row of 1 for bias unit
             A = np.vstack ([np.ones (n_samples), A])
+            self._As.append (A)
 
             if debug:
-                print ('|  +-----------------------------------------------')
-                print ('|  | At {0}-th hidden layer, '.format (ith))
-                print ('|  |   -- A shape    : {0}'.format (A.shape))
-                print ('|  |   -- theta shape: {0}'.format (theta_i.shape))
+                print ('##  +-----------------------------------------------')
+                print ('##  | At {0}-th layer, '.format (ith))
+                print ('##  |   -- theta shape: {0}'.format (theta_i.shape))
+                print ('##  |   -- A shape    : {0}'.format (A.shape))
 
             ## At the i-th layer, a matrix `Z` is defined as the dot product
             ## between the theta of this layer and previous `A`. `Z` is the
             ## linear combination from all neurons of the i-th layer multiplied
             ## by the corresponding weight a.k.a. theta.
             Z = np.matmul (theta_i, A)
+            self._Zs.append (Z)
             ## Matrix `A` of this layer is simply the sigmoid of Z
             A = sigmoid (Z)
 
-            if debug:
-                print ('|  |   -- theta shape: {0}'.format (theta_i.shape))
-                print ('|  |   -- A shape    : {0}'.format (A.shape))
-            #print ('A_0         shape: {0}'.format (A_0.shape))
-            #print ('Theta_0     shape: {0}'.format (Thetas[0].shape))
-            #print ('Z_1 = T0.A0 shape: {0}'.format (Z_1.shape))
-            #print ('A_1 = g(Z1) shape: {0}'.format (A_1.shape))
-            #print ('')
+            if debug: print ('##  |   -- Z shape    : {0}'.format (Z.shape))
 
             ## Accumulate regularization term. The first column which corresponds
             ## to the `constant` y-intercept parameters are ignored.
@@ -303,13 +347,19 @@ class neural_network (object):
         ### j-th row corresponds to the propbability that the i-th image belongs to
         ### the j-th class, where j-th class can be any digits between 0 and 9.
 
+        ### numpify Z and A
+        self._As.append (A)
+        self._Zs, self._As = np.array (self._Zs), np.array (self._As)
+
+        if debug:
+            print ('##  +-----------------------------------------------')
+            print ('##')
+
         ### Now that we have the predictions `A`, we need to define
         ### a similar matrix of truth `Y`. This matrix has the same
         ### size as `A` but its elements are either 0 or 1 - an image
         ### must belong to one and only one of the 10 classes.
-        Y = np.zeros_like (A)
-        for digit in range (self._n_classes):
-            Y [digit, :] = labels==digit
+        Y = self._get_truth_matrix (labels)
 
         ### To compare the prediction and truth, a cost is defined for each input
         ### image. Note that `*` here is performed element-wise and is not a dot
@@ -318,136 +368,214 @@ class neural_network (object):
         ### The averaged total cost is the mean of all costs. This averaged cost
         ### is similar to a chi2 in a simple line fit.
         j = np.sum (J) / n_samples
+        if debug: print ('##  Averaged cost before regularization is {0}'.format (j))
 
-        ### Finally, regularizatoin is added to the total cost. The purpose of
+        ### Finally, regularization is added to the total cost. The purpose of
         ### regularization is to reduce the importance of each theta / weight by
         ### adding a small factor that depends on the square of theta. This is
         ### similar to adding penalties during chi2 minimization when theta is
         ### getting too large.
         j += Lambda / 2 / n_samples * theta_squared
+        if debug:
+            print ('##  Averaged cost after  regularization is {0}'.format (j))
+            print ('##')
 
         ### If the cost is infinite, set the cost to be a very large value.
         if not np.isfinite (j): j = 1e10
 
+        ### return both cost `j`
         return j
 
+    def compute_dcost (self, thetas, labels,
+                       Lambda=default_Lambda, debug=False):
+
+        ''' To train the NN, we need to minimiuze the cost. Minimization is about
+            finding the extrema of the cost in all theta spaces simultaneously. One
+            way to speed up the minimization process is to provide the minimizer the
+            derivatives. This is why we need to compute the derivatives of cost with
+            respect to all thetas.
+
+            input params
+            ------------
+            thetas (np.ndarray): a 1D giant array of flattened theta matrices
+            labels (np.ndarray): a 1D array of the true value of the image
+            Lambda (float)     : regularization factor
+            debug  (bool)      : If True, print progress
+
+            return params
+            -------------
+            dJ_dThetas (np.ndarray): the derivatives of cost r.w.t. each theta
+        '''
+
+        ### make sure the cost is calculated by checking if either As or Zs is none
+        if self._Zs is None or self._As is None:
+            raise UnboundLocalError ('Cost must be calculated before its derivatives.')
+
+        ### define / initialize parameters
+        n_samples        = len (labels)               # number of input samples
+        theta_squared    = 0.                         # regularization term
+        thetas_generator = self.roll_array (thetas,   # input thetas in matrix form
+                                            reverse=True)
+
+        ### initialize a container to hold dcost/dtheta_i from all layers
+        ##  Note: each element is a matrix of different shape from other elements.
+        dJ_dThetas = []
+
+        ### start with the truth at the output layer
+        truth = self._get_truth_matrix (labels)
+        ### its delta is the difference between predictions and truth
+        delta = self._As[self.n_layers-1] - truth
+
+        if debug:
+            print ('## Computing the derivative of cost w.r.t. thetas ...')
+            print ('## ')
+
+        ### loop through each hidden layer from outer to inner.
+        for ith in range (self.n_layers-2, -1, -1):
+
+            ## Derivative at i-th layer depends on A from previous layer
+            previous_A = self._As[ith]
+            if debug:
+                print ('##  +-----------------------------------------------')
+                print ('##  | At {0}-th layer, '.format (ith))
+                print ('##  |   -- delta shape: {0}'.format (delta.shape))
+                print ('##  |   -- pre A shape: {0}'.format (previous_A.shape))
+
+            ## Derivatives at i-th layer is given by
+            ##      dJ/dTheta_i = delta_(i+1) . a_i.T / n_samples
+            dJ = np.matmul (delta, previous_A.T) / n_samples
+            if debug: print ('##  |   -- dJ    shape: {0}'.format (dJ.shape))
+
+            ## Get the weights a.k.a. the thetas of this layer
+            theta = next (thetas_generator)
+            if debug: print ('##  |   -- theta shape: {0}'.format (theta.shape))
+
+            ## Add the extra regularized term
+            dJ += Lambda / n_samples * theta
+            ## Append to dJ_dThetas
+            dJ_dThetas.append (dJ)
+
+            ## If there is the next round, set delta for the next layer
+            ##      delta_i = Theta_i.T . delta_(i+1) * g' (Z_i)
+            if not ith == 0:
+                delta = np.matmul (theta[:,1:].T, delta) * dsigmoid (self._Zs[ith-1])
+
+        ### After the loop, dJ_dThetas has a length of (n_layers-1). Each element has
+        ### the same shape as theta matrix at that layer without the bias units. Since
+        ### the above for loop loops from outer most layer to input layer, dJ_dThetas
+        ### need to be flipped so that the first element corresponds to the theta
+        ### matrix of the first layer.
+        dJ_dThetas = np.flip (np.array (dJ_dThetas), 0) ## 0 means flip w.r.t. row
+        if debug:
+            print ('##  +-----------------------------------------------')
+            print ('##')
+
+        ### return the completed flattened array of derivatives
+        return self.unroll_array (dJ_dThetas)
+
+    def _compute_diff (self, tiny_value, dJ, thetas, images,
+                       labels, Lambda=default_Lambda):
+
+        ''' A private generator function to compute the difference between the cost
+            derivatives from the compute_dcost () function and an approximated cost
+            derivatives from a tiny difference in one of the thetas.
+
+            input params
+            ------------
+            tiny_value (float): a small deviation from the current theta
+            dJ    (np.ndarray): the cost derivatives from compute_dcost ()
+            thetas (np.ndarray): a 1D giant array of flattened theta matrices
+            images (np.ndarray): a n_sample x n_pixels_per_row x n_pixels_per_col
+                                 matrix. Each pixel value is between 0 and 1 depending
+                                 on the intensity of the pixel.
+            labels (np.ndarray): a 1D array of the true value of the image
+            Lambda (float)     : regularization factor
+
+            yield params
+            ------------
+            diff   (np.ndarray): a difference of a theta between cost derivative
+                                 from compute_dcost () and the approximation from
+                                 the slope of a tiny deviation in thetas.
+        '''
+
+        for index in range (len (thetas)):
+
+            ### define theta+ and theta- by a tiny_matrix.
+            ##  Most elements in tiny_matrix are 0, except that
+            ##  the current index of thetas has a tiny value.
+            tiny_matrix = np.zeros_like (thetas)
+            tiny_matrix[index] = tiny_value
+            theta_plus  = thetas + tiny_matrix
+            theta_minus = thetas - tiny_matrix
+
+            ### compute an approximated cost J
+            J_plus = self.compute_cost (theta_plus, images, labels,
+                                        Lambda=Lambda, debug=False)
+            J_minus = self.compute_cost (theta_minus, images, labels,
+                                         Lambda=Lambda, debug=False)
+            approx_dJ = (J_plus - J_minus)/(2*tiny_value)
+
+            ### compute the difference
+            diff = abs (dJ[index] - approx_dJ)
+            yield (diff)
+
+    def check_derivatives (self, thetas, images, labels,
+                           Lambda=default_Lambda, debug=False):
+
+        ''' A function to check derivatives of costs computed by compute_dcost (). For
+            each theta, an approximation of cost derivative is computed by calculating
+            its slope in a tiny deviation in the theta. This function calculates the
+            differences between all cost derivatives from compute_dcost () and all
+            approximations from all thetas, and it prints out the mean difference
+            on console. If the algorithm works correctly, this difference should be
+            tiny ~ 10**-5.
+
+            input params
+            ------------
+            thetas (np.ndarray): a 1D giant array of flattened theta matrices
+            images (np.ndarray): a n_sample x n_pixels_per_row x n_pixels_per_col
+                                 matrix. Each pixel value is between 0 and 1 depending
+                                 on the intensity of the pixel.
+            labels (np.ndarray): a 1D array of the true value of the image
+            Lambda (float)     : regularization factor
+            debug  (bool)      : If True, print progress
+        '''
+
+        if debug:
+            print ('## Checking derivatives ...')
+            print ('## ')
+
+        ### make sure input thetas are 1D
+        if not len (thetas.shape) == 1:
+            thetas = self.unroll_array (thetas)
+
+        ### compute the cost and its derivatives
+        J = self.compute_cost (thetas, images, labels,
+                               Lambda=Lambda, debug=debug)
+        dJ = self.compute_dcost (thetas, labels,
+                                 Lambda=Lambda, debug=debug)
+
+        ### check the derivatives by computing the slope over
+        ### a tiny range in one of the many thetas
+        tiny_value = 1e-4
+        total_diff = sum (self._compute_diff (tiny_value, dJ, thetas, images,
+                                              labels, Lambda=Lambda))
+        print ('mean difference is {0:.8f}.'.format (total_diff / len (thetas)))
+
+    def fit (self, thetas):
+
+        ### make sure input thetas are 1D
+        if not len (thetas.shape) == 1:
+            thetas = self.unroll_array (thetas)
+
+        results = minimize (self.compute_cost, thetas,
+                            method='L-BFGS-B',
+                            jac=self.compute_dcost,
+                            options={'disp':True, 'maxiter':15000})
+
+        print (results)
+
 '''
-
-J = compute_cost (flat_thetas)
-J
-
-### +-----------------------------------------------------------
-### | Step 6. compute derivative of cost function via backward propagation
-### +-----------------------------------------------------------
-
-
-def compute_derivatives (thetas):
-
-    ## define variables
-    n_samples = len (labels)
-    n_classes = 10
-    Thetas = roll_array (thetas)
-
-    ## Compute A_1, the neurons at the hidden layer
-    A_0 = [images[i].flatten () for i in range (n_samples)]
-    A_0 = np.vstack ([np.ones (n_samples), np.array (A_0).T])
-    #  Calculate A_1 from A_0 and Theta[0]
-    Z_1 = np.matmul (Thetas[0], A_0)
-    A_1 = sigmoid (Z_1)
-
-    ## Compute A_2, the neurons at the outer layer
-    A_1 = np.vstack ([np.ones (n_samples), A_1])
-    #  Calculate A_2 from A_1 and Theta[1]
-    Z_2 = np.matmul (Thetas[1], A_1)
-    A_2 = sigmoid (Z_2)
-
-    ## define a Y matrix representing the truth
-    #  Initialize a zero matrix of the same size as A_2
-    Y = np.zeros_like (A_2);
-    for digit in range (n_classes):
-        Y [digit, :] = labels==digit
-
-    ##  Initialize a list to hold all derivatives
-    dJ_dThetas = []
-
-    ##  Step 1: derivatives of J w.r.t. Theta_1
-    ##          delta_2 at the outer layer
-    delta_2 = A_2 - Y
-    ##          dJ/dTheta_1
-    dJ_dTheta1 = np.matmul (delta_2, A_1.T) / float (n_samples)
-    ##          add the extra regularized term
-    reg_term = deepcopy (Thetas[1])
-    reg_term[:,0] = 0
-    dJ_dTheta1 += Lambda / float (n_samples) * reg_term
-    ##          append to dJ_dThetas
-    dJ_dThetas.append (dJ_dTheta1)
-    #print ('')
-    #print ('A_2, Y         shape: {0}, {1}'.format (A_2.shape, Y.shape))
-    #print ('delta_2 = A2-Y shape: {0}'.format (delta_2.shape))
-    #print ('A_1            shape: {0}'.format (A_1.shape))
-    #print ('dJ1 = d2.A1t   shape: {0}'.format (dJ_dTheta1.shape))
-
-    ##  Step 2: derivatives of J w.r.t. Theta_0
-    ##          delta_1 at the hidden layer
-    delta_1 = np.matmul (Thetas[1][:,1:].T, delta_2) * dsigmoid (Z_1)
-    ##          dJ/dTheta_0
-    dJ_dTheta0 = np.matmul (delta_1, A_0.T) / float (n_samples)
-    #print ('')
-    #print ('delta_2              shape: {0}'.format (delta_2.shape))
-    #print ('theta_1              shape: {0}'.format (Thetas[1].shape))
-    #print ('A_1                  shape: {0}'.format (A_1.shape))
-    #print ('delta1=T1t.d2*dg(A1) shape: {0}'.format (delta_1.shape))
-    #print ('A_0                  shape: {0}'.format (A_0.shape))
-    #print ('dJ0 = d1.A0t         shape: {0}'.format (dJ_dTheta0.shape))
-    #print ('')
-    #print ('delta_1[1:,:][0]: {0}'.format (delta_1[1:,:][0]))
-    #print ('A_0.T[:,1]: {0}'.format (A_0.T[:,1]))
-    #print (dJ_dTheta0[0][1])
-
-    ##          add the extra regularized term
-    reg_term = deepcopy (Thetas[0])
-    reg_term[:,0] = 0
-    dJ_dTheta0 += Lambda / float (n_samples) * reg_term
-    ##          append to dJ_dThetas
-    dJ_dThetas.append (dJ_dTheta0)
-
-    ##  Step 3: reverse dJ_dThetas s.t its ordering follows Thetas
-    dJ_dThetas = np.flip (np.array (dJ_dThetas), 0)
-
-    return unroll_array (dJ_dThetas)
-
-### +-----------------------------------------------------------
-### | Step 8. sanity check
-### +-----------------------------------------------------------
-flat_thetas = unroll_array (initial_thetas)
-unflat_thetas = roll_array (flat_thetas)
-
-J = compute_cost (flat_thetas)
-dJ = compute_derivatives (flat_thetas)
-
-epsilon = 1e-4
-for index in range (500):
-    eps = np.zeros_like (flat_thetas)
-    eps[index] = epsilon
-    theta_plus = flat_thetas + eps
-    theta_minus = flat_thetas - eps
-
-    J_plus = compute_cost (theta_plus)
-    J_minus = compute_cost (theta_minus)
-    approx_dJ = (J_plus - J_minus)/(2*epsilon)
-    #print ('{0} {1}'.format (dJ[index], approx_dJ))
-
-### +-----------------------------------------------------------
-### | Step 7. minimize cost function with provided derivatives
-### +-----------------------------------------------------------
-flat_thetas = unroll_array (initial_thetas)
-results = minimize (compute_cost, flat_thetas,
-                    method='L-BFGS-B',
-                    jac=compute_derivatives,
-                    options={'disp':True, 'maxiter':15000})
-
-print (results)
-
 ### +-----------------------------------------------------------
 ### | Step 8. get predictions
 ### +-----------------------------------------------------------
